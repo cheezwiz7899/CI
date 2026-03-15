@@ -137,6 +137,13 @@ jobs:
           git submodule sync --recursive
           git submodule update --init --recursive --depth 1 --force
 
+      - name: Ensure vcpkg has full history
+        working-directory: ./citron_source
+        run: |
+          if [ "$(git -C externals/vcpkg rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+            git -C externals/vcpkg fetch --unshallow --tags
+          fi
+
       - name: Get Citron Commit Hash
         id: get_hash
         working-directory: ./citron_source
@@ -256,6 +263,13 @@ jobs:
         run: |
           git submodule sync --recursive
           git submodule update --init --recursive --depth 1 --force
+
+      - name: Ensure vcpkg has full history
+        working-directory: ./citron_source
+        run: |
+          if [ "$(git -C externals/vcpkg rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+            git -C externals/vcpkg fetch --unshallow --tags
+          fi
 
       - name: Get Citron Commit Hash
         id: get_hash

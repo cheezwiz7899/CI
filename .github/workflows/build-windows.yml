@@ -104,6 +104,14 @@ jobs:
             sleep 15
           done
 
+      - name: Ensure vcpkg has full history
+        working-directory: ./citron
+        shell: bash
+        run: |
+          if [ "$(git -C externals/vcpkg rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then
+            git -C externals/vcpkg fetch --unshallow --tags
+          fi
+
       - name: Cache vcpkg and Qt dependencies
         uses: actions/cache@v4
         id: cache-vcpkg
