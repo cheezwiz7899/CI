@@ -99,6 +99,8 @@ jobs:
             mingw-w64-ucrt-x86_64-opus
             mingw-w64-ucrt-x86_64-openal
             mingw-w64-ucrt-x86_64-libusb
+            mingw-w64-ucrt-x86_64-enet
+            mingw-w64-ucrt-x86_64-fmt
             git
             base-devel
 
