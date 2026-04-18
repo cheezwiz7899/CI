@@ -646,10 +646,10 @@ jobs:
           path: "dist/*.dmg"
 
   # ===========================================================================
-  # WINDOWS: MinGW + MSVC nightly builds and the nightly-windows GitHub Release
-  # are handled exclusively by .github/workflows/build-windows.yml (same cron).
-  # A duplicate release job here used to run after that workflow and recreate
-  # nightly-windows with only the MinGW zip, dropping the MSVC asset.
+  # WINDOWS: MinGW + MSVC + Clangtron nightly builds and the nightly-windows
+  # GitHub Release are handled exclusively by .github/workflows/build-windows.yml
+  # (same cron). A duplicate release job here used to run after that workflow
+  # and recreate nightly-windows with only the MinGW zip, dropping other assets.
   # ===========================================================================
 
   # ===========================================================================
