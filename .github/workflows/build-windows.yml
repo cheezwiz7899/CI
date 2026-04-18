@@ -403,10 +403,105 @@ jobs:
           name: Citron-Windows-Nightly-MSVC-x64
           path: "dist/*.zip"
 
+  build-clangtron:
+    name: "Citron Build (Windows Clangtron - x64)"
+    needs: [check-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Clone Citron Source (Clangtron)
+        run: |
+          ATTEMPT=0
+          MAX_ATTEMPTS=999
+          while true; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning Citron..."
+
+            rm -rf citron
+
+            if git clone --recursive "https://github.com/citron-neo/emulator.git" citron; then
+              echo "Clone successful on attempt $ATTEMPT."
+              break
+            fi
+
+            if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+              echo "Failed after $MAX_ATTEMPTS attempts."
+              exit 1
+            fi
+
+            echo "Clone failed. Retrying in 15 seconds..."
+            sleep 15
+          done
+
+      - name: Cache llvm-mingw toolchain
+        uses: actions/cache@v4
+        id: cache-llvm-mingw
+        with:
+          path: ./citron/build/llvm-mingw
+          key: clangtron-llvm-mingw-${{ runner.os }}-20260224
+
+      - name: Cache vcpkg archives (Clangtron)
+        uses: actions/cache@v4
+        with:
+          path: ~/.vcpkg/archives
+          key: clangtron-vcpkg-${{ runner.os }}-${{ hashFiles('citron/vcpkg.json') }}
+          restore-keys: |
+            clangtron-vcpkg-${{ runner.os }}-
+
+      - name: Get Version (Clangtron)
+        id: version
+        working-directory: ./citron
+        run: |
+          git fetch --tags
+          VERSION=$(git rev-parse --short HEAD)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Skip BOLT build (not needed for --pgo none)
+        run: |
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/llvm-bolt-21
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/merge-fdata-21
+          sudo chmod +x /usr/local/bin/llvm-bolt-21
+          sudo chmod +x /usr/local/bin/merge-fdata-21
+
+      - name: Setup Clangtron Build Environment
+        working-directory: ./citron
+        run: |
+          chmod +x build-clangtron-windows.sh
+          ./build-clangtron-windows.sh setup
+
+      - name: Build Citron (Clangtron LTO)
+        working-directory: ./citron
+        run: |
+          export CITRON_BUILD_TYPE=Release
+          ./build-clangtron-windows.sh use --pgo none --lto full
+
+      - name: Package Windows Build (Clangtron)
+        run: |
+          mkdir -p dist
+          BIN_DIR="./citron/build/use-nopgo/bin"
+          if [ ! -d "$BIN_DIR" ]; then
+            echo "::error::Build output not found at $BIN_DIR"
+            exit 1
+          fi
+          cd "$BIN_DIR"
+          zip -r "${GITHUB_WORKSPACE}/dist/Citron-windows-nightly-${{ steps.version.outputs.VERSION }}-x64-clangtron.zip" .
+
+      - name: Upload Windows Build (Clangtron)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Citron-Windows-Nightly-Clangtron-x64
+          path: "dist/*.zip"
+
   release:
     if: ${{ github.ref_name == 'main' }}
     name: "Release"
-    needs: [check-version, build-mingw, build-msvc]
+    needs: [check-version, build-mingw, build-msvc, build-clangtron]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -441,6 +536,7 @@ jobs:
           files: |
             release-artifacts/*-x64-mingw.zip
             release-artifacts/*-x64-msvc.zip
+            release-artifacts/*-x64-clangtron.zip
           body: |
             **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
 
@@ -448,7 +544,7 @@ jobs:
 
             **Build Details:**
             - Platform: Windows (x64)
-            - Toolchains: MinGW-w64 (MSYS2 UCRT64) + MSVC (Visual Studio 2022)
+            - Toolchains: MinGW-w64 (MSYS2 UCRT64) + MSVC (Visual Studio 2022) + Clangtron (Clang LTO cross-compiled)
             - Build Type: Release
             - Date: ${{ env.BUILD_DATE }}
       - name: Update LATEST_VERSION
@@ -474,5 +570,5 @@ jobs:
             exit 0
           fi
           curl -H "Content-Type: application/json" \
-               -d "{\"content\":\"🪟 **New Windows Builds Available!**\n\n📦 **Version:** \`${{ env.APP_VERSION }}\`\n📅 **Date:** ${DATE}\n🔧 **Toolchains:** MinGW-w64 (UCRT64) + MSVC\n🔗 **Download:** $DOWNLOAD_URL\"}" \
+               -d "{\"content\":\"🪟 **New Windows Builds Available!**\n\n📦 **Version:** \`${{ env.APP_VERSION }}\`\n📅 **Date:** ${DATE}\n🔧 **Toolchains:** MinGW-w64 (UCRT64) + MSVC + Clangtron (Clang LTO)\n🔗 **Download:** $DOWNLOAD_URL\"}" \
                "$WEBHOOK_URL"
