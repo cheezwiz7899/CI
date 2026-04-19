@@ -189,82 +189,7 @@ jobs:
             echo "Warning: vcpkg bin dir not found at $VCPKG_BIN"
           fi
 
-      - name: Prune unused DLLs from build/bin (MinGW)
-        working-directory: ./citron
-        run: |
-          # CopyMinGWDeps.cmake pulls in the full transitive closure of citron.exe
-          # through /ucrt64/bin, including many DLLs that are never actually loaded.
-          #
-          # We compute the true required set using a full recursive objdump closure:
-          # starting from the citron binaries, we follow every DLL import reference
-          # and collect any DLL that is present in build/bin. We repeat until no
-          # new DLLs are added. Anything not reached by this walk is deleted.
-          #
-          # This is correct by construction: if Windows would load a DLL at startup
-          # (directly or transitively through another DLL we ship), it will be in
-          # the closure. If it would not be loaded, it won't be. No hardcoded lists.
 
-          BIN_DIR="./build/bin"
-
-          echo "=== DLLs before pruning: $(find "$BIN_DIR" -maxdepth 1 -name "*.dll" | wc -l) ==="
-
-          # Build a lookup of lowercase dll name -> path for every DLL in bin/
-          declare -A bin_dlls
-          while IFS= read -r dll_path; do
-            dll_name=$(basename "$dll_path" | tr '[:upper:]' '[:lower:]')
-            bin_dlls["$dll_name"]="$dll_path"
-          done < <(find "$BIN_DIR" -maxdepth 1 -name "*.dll")
-
-          # Closure: set of lowercase dll names known to be required
-          declare -A closure
-          # Queue: dll names to process
-          declare -a queue
-
-          # Seed with the citron executables
-          for exe in "$BIN_DIR"/citron.exe "$BIN_DIR"/citron-cmd.exe "$BIN_DIR"/citron-room.exe; do
-            [[ -f "$exe" ]] || continue
-            while IFS= read -r dep; do
-              dep_lower=$(echo "$dep" | tr '[:upper:]' '[:lower:]')
-              if [[ -n "${bin_dlls[$dep_lower]+_}" && -z "${closure[$dep_lower]+_}" ]]; then
-                closure["$dep_lower"]=1
-                queue+=("$dep_lower")
-              fi
-            done < <(objdump -p "$exe" 2>/dev/null | awk '/DLL Name:/{print $3}')
-          done
-
-          # BFS: expand through each newly discovered DLL in bin/
-          while [[ ${#queue[@]} -gt 0 ]]; do
-            current="${queue[0]}"
-            queue=("${queue[@]:1}")
-            dll_path="${bin_dlls[$current]}"
-            while IFS= read -r dep; do
-              dep_lower=$(echo "$dep" | tr '[:upper:]' '[:lower:]')
-              if [[ -n "${bin_dlls[$dep_lower]+_}" && -z "${closure[$dep_lower]+_}" ]]; then
-                closure["$dep_lower"]=1
-                queue+=("$dep_lower")
-              fi
-            done < <(objdump -p "$dll_path" 2>/dev/null | awk '/DLL Name:/{print $3}')
-          done
-
-          echo "Closure size: ${#closure[@]} DLLs required"
-
-          # Remove everything in bin/ that is not in the closure
-          removed=0
-          kept=0
-          while IFS= read -r dll_path; do
-            dll_lower=$(basename "$dll_path" | tr '[:upper:]' '[:lower:]')
-            if [[ -z "${closure[$dll_lower]+_}" ]]; then
-              echo "  Pruning: $(basename "$dll_path")"
-              rm -f "$dll_path"
-              removed=$((removed + 1))
-            else
-              kept=$((kept + 1))
-            fi
-          done < <(find "$BIN_DIR" -maxdepth 1 -name "*.dll")
-
-          echo "=== Pruned $removed, kept $kept ==="
-          echo "=== Final DLL list ==="
-          find "$BIN_DIR" -maxdepth 1 -name "*.dll" | sort | xargs -I{} basename {}
 
       - name: Package Windows Build (MinGW)
         shell: pwsh
@@ -403,10 +328,129 @@ jobs:
           name: Citron-Windows-Nightly-MSVC-x64
           path: "dist/*.zip"
 
+  build-clangtron:
+    name: "Citron Build (Windows Clangtron - x64)"
+    needs: [check-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Clone Citron Source (Clangtron)
+        run: |
+          ATTEMPT=0
+          MAX_ATTEMPTS=999
+          while true; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning Citron..."
+
+            rm -rf citron
+
+            if git clone --recursive "https://github.com/citron-neo/emulator.git" citron; then
+              echo "Clone successful on attempt $ATTEMPT."
+              break
+            fi
+
+            if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+              echo "Failed after $MAX_ATTEMPTS attempts."
+              exit 1
+            fi
+
+            echo "Clone failed. Retrying in 15 seconds..."
+            sleep 15
+          done
+
+      - name: Cache llvm-mingw toolchain
+        uses: actions/cache@v4
+        id: cache-llvm-mingw
+        with:
+          path: ./citron/build/llvm-mingw
+          key: clangtron-llvm-mingw-${{ runner.os }}-20260224
+
+      - name: Cache vcpkg archives (Clangtron)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+            citron/externals/vcpkg/downloads
+          key: clangtron-vcpkg-${{ runner.os }}-${{ hashFiles('citron/vcpkg.json', 'citron/build-clangtron-windows.sh') }}
+          restore-keys: |
+            clangtron-vcpkg-${{ runner.os }}-
+
+      - name: Get Version (Clangtron)
+        id: version
+        working-directory: ./citron
+        run: |
+          git fetch --tags
+          VERSION=$(git rev-parse --short HEAD)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Skip BOLT build (not needed for --pgo none)
+        run: |
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/llvm-bolt-21
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/merge-fdata-21
+          sudo chmod +x /usr/local/bin/llvm-bolt-21
+          sudo chmod +x /usr/local/bin/merge-fdata-21
+
+      - name: Get FFmpeg Version
+        id: ffmpeg-ver
+        working-directory: ./citron
+        run: |
+          VERSION=$(tr -d '[:space:]' < externals/ffmpeg/ffmpeg/RELEASE)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Cache built FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: citron/build/use-nopgo/externals/ffmpeg-${{ steps.ffmpeg-ver.outputs.VERSION }}
+          key: clangtron-ffmpeg-built-${{ runner.os }}-${{ steps.ffmpeg-ver.outputs.VERSION }}-${{ hashFiles('citron/build-clangtron-windows.sh') }}
+
+      - name: Cache Qt (Clangtron)
+        uses: actions/cache@v4
+        with:
+          path: |
+            citron/build/use-nopgo/externals/qt
+            citron/build/use-nopgo/externals/qt-host
+          key: clangtron-qt-6.9.3-${{ runner.os }}-${{ hashFiles('citron/build-clangtron-windows.sh') }}
+
+      - name: Setup Clangtron Build Environment
+        working-directory: ./citron
+        run: |
+          chmod +x build-clangtron-windows.sh
+          ./build-clangtron-windows.sh setup
+          echo "${GITHUB_WORKSPACE}/citron/build/llvm-mingw/bin" >> "$GITHUB_PATH"
+
+      - name: Build Citron (Clangtron LTO)
+        working-directory: ./citron
+        run: |
+          export CITRON_BUILD_TYPE=Release
+          ./build-clangtron-windows.sh use --pgo none --lto full
+
+      - name: Package Windows Build (Clangtron)
+        run: |
+          mkdir -p dist
+          BIN_DIR="./citron/build/use-nopgo/bin"
+          if [ ! -d "$BIN_DIR" ]; then
+            echo "::error::Build output not found at $BIN_DIR"
+            exit 1
+          fi
+          cd "$BIN_DIR"
+          zip -r "${GITHUB_WORKSPACE}/dist/Citron-windows-nightly-${{ steps.version.outputs.VERSION }}-x64-clangtron.zip" .
+
+      - name: Upload Windows Build (Clangtron)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Citron-Windows-Nightly-Clangtron-x64
+          path: "dist/*.zip"
+
   release:
     if: ${{ github.ref_name == 'main' }}
     name: "Release"
-    needs: [check-version, build-mingw, build-msvc]
+    needs: [check-version, build-mingw, build-msvc, build-clangtron]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -441,6 +485,7 @@ jobs:
           files: |
             release-artifacts/*-x64-mingw.zip
             release-artifacts/*-x64-msvc.zip
+            release-artifacts/*-x64-clangtron.zip
           body: |
             **Citron Upstream Commit:** [`${{ needs.check-version.outputs.new_hash }}`](https://github.com/citron-neo/emulator/commit/${{ needs.check-version.outputs.new_hash_full }})
 
@@ -448,7 +493,7 @@ jobs:
 
             **Build Details:**
             - Platform: Windows (x64)
-            - Toolchains: MinGW-w64 (MSYS2 UCRT64) + MSVC (Visual Studio 2022)
+            - Toolchains: MinGW-w64 (MSYS2 UCRT64) + MSVC (Visual Studio 2022) + Clangtron (Clang LTO cross-compiled)
             - Build Type: Release
             - Date: ${{ env.BUILD_DATE }}
       - name: Update LATEST_VERSION
@@ -474,5 +519,5 @@ jobs:
             exit 0
           fi
           curl -H "Content-Type: application/json" \
-               -d "{\"content\":\"🪟 **New Windows Builds Available!**\n\n📦 **Version:** \`${{ env.APP_VERSION }}\`\n📅 **Date:** ${DATE}\n🔧 **Toolchains:** MinGW-w64 (UCRT64) + MSVC\n🔗 **Download:** $DOWNLOAD_URL\"}" \
+               -d "{\"content\":\"🪟 **New Windows Builds Available!**\n\n📦 **Version:** \`${{ env.APP_VERSION }}\`\n📅 **Date:** ${DATE}\n🔧 **Toolchains:** MinGW-w64 (UCRT64) + MSVC + Clangtron (Clang LTO)\n🔗 **Download:** $DOWNLOAD_URL\"}" \
                "$WEBHOOK_URL"

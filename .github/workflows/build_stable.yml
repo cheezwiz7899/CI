@@ -785,6 +785,128 @@ jobs:
           path: "dist/*.zip"
 
   # ===========================================================================
+  # WINDOWS (Clangtron - Clang LTO cross-compiled from Ubuntu)
+  # ===========================================================================
+  build-clangtron:
+    name: "Citron Build (Windows Clangtron - x64)"
+    needs: [check-version]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Clone Citron Source (Clangtron)
+        run: |
+          ATTEMPT=0
+          MAX_ATTEMPTS=999
+          while true; do
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning Citron..."
+
+            rm -rf citron
+
+            if git clone --recursive "https://github.com/citron-neo/emulator.git" citron; then
+              echo "Clone successful on attempt $ATTEMPT."
+              break
+            fi
+
+            if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
+              echo "Failed after $MAX_ATTEMPTS attempts."
+              exit 1
+            fi
+
+            echo "Clone failed. Retrying in 15 seconds..."
+            sleep 15
+          done
+
+      - name: Cache llvm-mingw toolchain
+        uses: actions/cache@v4
+        id: cache-llvm-mingw
+        with:
+          path: ./citron/build/llvm-mingw
+          key: clangtron-llvm-mingw-${{ runner.os }}-20260224
+
+      - name: Cache vcpkg archives (Clangtron)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/vcpkg/archives
+            citron/externals/vcpkg/downloads
+          key: clangtron-vcpkg-stable-${{ runner.os }}-${{ hashFiles('citron/vcpkg.json', 'citron/build-clangtron-windows.sh') }}
+          restore-keys: |
+            clangtron-vcpkg-stable-${{ runner.os }}-
+
+      - name: Get Version (Clangtron)
+        id: version
+        working-directory: ./citron
+        run: |
+          git fetch --tags
+          VERSION=$(git rev-parse --short HEAD)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Get FFmpeg Version
+        id: ffmpeg-ver
+        working-directory: ./citron
+        run: |
+          VERSION=$(tr -d '[:space:]' < externals/ffmpeg/ffmpeg/RELEASE)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Cache built FFmpeg
+        uses: actions/cache@v4
+        with:
+          path: citron/build/use-nopgo/externals/ffmpeg-${{ steps.ffmpeg-ver.outputs.VERSION }}
+          key: clangtron-ffmpeg-built-stable-${{ runner.os }}-${{ steps.ffmpeg-ver.outputs.VERSION }}-${{ hashFiles('citron/build-clangtron-windows.sh') }}
+
+      - name: Cache Qt (Clangtron)
+        uses: actions/cache@v4
+        with:
+          path: |
+            citron/build/use-nopgo/externals/qt
+            citron/build/use-nopgo/externals/qt-host
+          key: clangtron-qt-6.9.3-stable-${{ runner.os }}-${{ hashFiles('citron/build-clangtron-windows.sh') }}
+
+      - name: Skip BOLT build (not needed for --pgo none)
+        run: |
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/llvm-bolt-21
+          echo '#!/bin/bash' | sudo tee /usr/local/bin/merge-fdata-21
+          sudo chmod +x /usr/local/bin/llvm-bolt-21
+          sudo chmod +x /usr/local/bin/merge-fdata-21
+
+      - name: Setup Clangtron Build Environment
+        working-directory: ./citron
+        run: |
+          chmod +x build-clangtron-windows.sh
+          ./build-clangtron-windows.sh setup
+          echo "${GITHUB_WORKSPACE}/citron/build/llvm-mingw/bin" >> "$GITHUB_PATH"
+
+      - name: Build Citron (Clangtron LTO)
+        working-directory: ./citron
+        run: |
+          export CITRON_BUILD_TYPE=Stable
+          ./build-clangtron-windows.sh use --pgo none --lto full
+
+      - name: Package Windows Build (Clangtron)
+        run: |
+          mkdir -p dist
+          BIN_DIR="./citron/build/use-nopgo/bin"
+          if [ ! -d "$BIN_DIR" ]; then
+            echo "::error::Build output not found at $BIN_DIR"
+            exit 1
+          fi
+          cd "$BIN_DIR"
+          zip -r "${GITHUB_WORKSPACE}/dist/Citron-windows-stable-${{ steps.version.outputs.VERSION }}-x64-clangtron.zip" .
+
+      - name: Upload Windows Build (Clangtron)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Citron-Windows-Stable-Clangtron-x64
+          path: "dist/*.zip"
+
+  # ===========================================================================
   # RELEASE - Android
   # ===========================================================================
   release-android:
@@ -1023,7 +1145,7 @@ jobs:
   release-windows:
     if: ${{ github.ref_name == 'main' }}
     name: "Release Windows Stable"
-    needs: [check-version, build-windows]
+    needs: [check-version, build-windows, build-clangtron]
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -1033,7 +1155,8 @@ jobs:
         uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: Citron-Windows-Stable-x64
+          pattern: Citron-Windows-Stable-*
+          merge-multiple: true
           path: .
       - name: Get Version from Filename
         shell: bash
@@ -1062,7 +1185,7 @@ jobs:
 
             **Build Details:**
             - Platform: Windows (x64)
-            - Toolchain: MinGW-w64 (MSYS2 UCRT64)
+            - Toolchains: MinGW-w64 (MSYS2 UCRT64) + Clangtron (Clang LTO cross-compiled)
             - Build Type: Stable
             - Date: ${{ env.BUILD_DATE }}
       - name: Update LATEST_VERSION
@@ -1084,5 +1207,5 @@ jobs:
           WEBHOOK_URL="${{ secrets.DISCORD_WEBHOOK }}"
           if [ -z "$WEBHOOK_URL" ]; then echo "DISCORD_WEBHOOK is not set; skipping."; exit 0; fi
           curl -H "Content-Type: application/json" \
-               -d "{\"content\":\"🪟 **New Windows Stable Release!**\n\n📦 **Version:** \`${{ env.APP_VERSION }}\`\n📅 **Date:** ${DATE}\n🔧 **Toolchain:** MinGW-w64 (UCRT64)\n🔗 **Download:** $DOWNLOAD_URL\"}" \
+               -d "{\"content\":\"🪟 **New Windows Stable Release!**\n\n📦 **Version:** \`${{ env.APP_VERSION }}\`\n📅 **Date:** ${DATE}\n🔧 **Toolchains:** MinGW-w64 (UCRT64) + Clangtron (Clang LTO)\n🔗 **Download:** $DOWNLOAD_URL\"}" \
                "$WEBHOOK_URL"
