@@ -2,6 +2,7 @@
 
 set -ex
 ARCH="$(uname -m)"
+EXTRA_PACKAGES="https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/refs/heads/main/useful-tools/get-debloated-pkgs.sh"
 
 pacman -Syu --noconfirm --needed \
 	base-devel          \
@@ -13,14 +14,12 @@ pacman -Syu --noconfirm --needed \
 	curl                \
 	enet                \
 	fmt                 \
-	ffmpeg              \
 	gamemode            \
 	gcc                 \
 	git                 \
 	glslang             \
 	glu                 \
 	hidapi              \
-	libdecor            \
 	libvpx              \
 	libxi               \
 	libxkbcommon-x11    \
@@ -36,11 +35,10 @@ pacman -Syu --noconfirm --needed \
 	openal              \
 	pulseaudio          \
 	pulseaudio-alsa     \
-	qt6-base            \
 	qt6-networkauth     \
 	qt6-multimedia      \
+	qt6-svg             \
 	qt6-tools           \
-	qt6-wayland         \
 	qt6-translations    \
 	sdl2                \
 	unzip               \
@@ -54,3 +52,7 @@ pacman -Syu --noconfirm --needed \
 	xorg-server-xvfb    \
 	zip                 \
 	zsync
+
+wget --retry-connrefused --tries=30 "$EXTRA_PACKAGES" -O ./get-debloated-pkgs.sh
+chmod +x ./get-debloated-pkgs.sh
+./get-debloated-pkgs.sh --add-mesa ffmpeg-mini qt6-base-mini libxml2-mini opus-mini
