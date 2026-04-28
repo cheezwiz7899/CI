@@ -113,7 +113,7 @@ jobs:
       - name: Clone Citron Source Code
         shell: bash
         run: |
-          REPO_URL="https://github.com/citron-neo/emulator.git"
+          REPO_URL="https://github.com/cheezwiz7899/emulator.git"
           FEATURE="feature/android-game-file-extraction"
           ATTEMPT=0
           MAX_ATTEMPTS=999
@@ -127,8 +127,8 @@ jobs:
                 echo "✅ Clone successful."; exit 0
               fi
             else
-              echo "📦 Cloning main branch"
-              if git clone --recursive "$REPO_URL" citron_source; then
+              echo "📦 Cloning clangtron-windows-cpm branch"
+              if git clone --recursive -b clangtron-windows-cpm "$REPO_URL" citron_source; then
                 echo "✅ Clone successful."; exit 0
               fi
             fi
@@ -227,7 +227,7 @@ jobs:
       - name: Clone Citron Source Code
         shell: bash
         run: |
-          REPO_URL="https://github.com/citron-neo/emulator.git"
+          REPO_URL="https://github.com/cheezwiz7899/emulator.git"
           FEATURE="feature/android-game-file-extraction"
           ATTEMPT=0
           MAX_ATTEMPTS=999
@@ -241,8 +241,8 @@ jobs:
                 echo "✅ Clone successful."; exit 0
               fi
             else
-              echo "📦 Cloning main branch"
-              if git clone --recursive "$REPO_URL" citron_source; then
+              echo "📦 Cloning clangtron-windows-cpm branch"
+              if git clone --recursive -b clangtron-windows-cpm "$REPO_URL" citron_source; then
                 echo "✅ Clone successful."; exit 0
               fi
             fi
@@ -382,14 +382,14 @@ jobs:
       - name: Clone Citron Source Code
         shell: bash
         run: |
-          REPO_URL="https://github.com/citron-neo/emulator.git"
+          REPO_URL="https://github.com/cheezwiz7899/emulator.git"
           ATTEMPT=0
           MAX_ATTEMPTS=999
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
             echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning repository..."
             rm -rf emulator
-            if git clone --recursive "$REPO_URL" emulator; then
+            if git clone --recursive -b clangtron-windows-cpm "$REPO_URL" emulator; then
               echo "✅ Clone successful on attempt $ATTEMPT."
               exit 0
             fi
@@ -467,7 +467,7 @@ jobs:
             ATTEMPT=$((ATTEMPT + 1))
             echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning repository..."
             rm -rf citron
-            if git clone --recursive "https://github.com/citron-neo/emulator.git" citron; then
+            if git clone --recursive -b clangtron-windows-cpm "https://github.com/cheezwiz7899/emulator.git" citron; then
               echo "✅ Clone successful on attempt $ATTEMPT."
               break
             fi
@@ -679,7 +679,7 @@ jobs:
 
             rm -rf citron
 
-            if git clone --recursive "https://github.com/citron-neo/emulator.git" citron; then
+            if git clone --recursive -b clangtron-windows-cpm "https://github.com/cheezwiz7899/emulator.git" citron; then
               echo "Clone successful on attempt $ATTEMPT."
               break
             fi
@@ -784,7 +784,7 @@ jobs:
 
             rm -rf citron
 
-            if git clone "https://github.com/citron-neo/emulator.git" citron; then
+            if git clone -b clangtron-windows-cpm "https://github.com/cheezwiz7899/emulator.git" citron; then
               echo "Clone successful on attempt $ATTEMPT."
               break
             fi
@@ -957,7 +957,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Checkout Upstream Repository
-        run: git clone https://github.com/citron-neo/emulator.git upstream_repo
+        run: git clone -b clangtron-windows-cpm https://github.com/cheezwiz7899/emulator.git upstream_repo
 
       - name: Set Version
         id: version
