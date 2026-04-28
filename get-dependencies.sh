@@ -26,6 +26,7 @@ pacman -Syu --noconfirm --needed \
 	libxss              \
 	lld                 \
 	llvm                \
+	rapidjson           \
 	mbedtls2            \
 	mesa                \
 	nasm                \
