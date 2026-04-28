@@ -187,7 +187,7 @@ jobs:
 
             rm -rf citron
 
-            if git clone --branch clangtron-windows-cpm "https://github.com/cheezwiz7899/emulator.git" citron; then
+            if git clone "https://github.com/citron-neo/emulator.git" citron; then
               echo "Clone successful on attempt $ATTEMPT."
               break
             fi
@@ -242,7 +242,7 @@ jobs:
         working-directory: ./citron
         run: |
           export CITRON_BUILD_TYPE=Release
-          ./build-clangtron-windows.sh use --pgo none --lto full --unity
+          ./build-clangtron-windows.sh use --pgo none --lto full
 
       - name: Package Windows Build (Clangtron)
         run: |
