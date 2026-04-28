@@ -13,8 +13,12 @@ else
 fi
 
 # --- Source Code Checkout and Versioning ---
-git clone --recursive "https://github.com/citron-neo/emulator.git" ./citron
-cd ./citron
+if [ ! -d "citron" ] && [ ! -d ".git" ]; then
+    git clone --recursive -b clangtron-windows-cpm "https://github.com/cheezwiz7899/emulator.git" ./citron
+    cd ./citron
+elif [ -d "citron" ]; then
+    cd ./citron
+fi
 
 if [ "$DEVEL" = 'true' ]; then
     CITRON_TAG="$(git rev-parse --short HEAD)"

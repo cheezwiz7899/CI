@@ -34,7 +34,7 @@ jobs:
       - name: Check if feature branch exists and get commit hash
         id: branch_check
         run: |
-          REPO_URL="https://github.com/citron-neo/emulator.git"
+          REPO_URL="https://github.com/cheezwiz7899/emulator.git"
           FEATURE="NULL"
 
           if git ls-remote --heads "$REPO_URL" "$FEATURE" | grep -q "$FEATURE"; then
@@ -42,8 +42,8 @@ jobs:
             FULL_HASH=$(git ls-remote "$REPO_URL" "$FEATURE" | cut -f1)
             echo "✅ Using feature branch: $BRANCH_NAME"
           else
-            BRANCH_NAME="main"
-            FULL_HASH=$(git ls-remote "$REPO_URL" HEAD | cut -f1)
+            BRANCH_NAME="clangtron-windows-cpm"
+            FULL_HASH=$(git ls-remote "$REPO_URL" "$BRANCH_NAME" | cut -f1)
             echo "⚠️ Feature branch not found, falling back to: $BRANCH_NAME"
           fi
 
@@ -388,9 +388,12 @@ jobs:
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
             echo "Attempt $ATTEMPT of $MAX_ATTEMPTS: Cloning repository..."
-            rm -rf emulator
-            if git clone --recursive -b clangtron-windows-cpm "$REPO_URL" emulator; then
+            rm -rf citron
+            if git clone --recursive -b clangtron-windows-cpm "$REPO_URL" citron; then
               echo "✅ Clone successful on attempt $ATTEMPT."
+              mv get-dependencies.sh citron/
+              mv build-citron.sh citron/
+              mv package-citron.sh citron/
               exit 0
             fi
             echo "⚠️ Clone failed. Retrying in 15 seconds..."
@@ -399,22 +402,16 @@ jobs:
           echo "❌ Failed to clone after $MAX_ATTEMPTS attempts."
           exit 1
 
-      - name: Prepare Build Environment
-        run: |
-          mv get-dependencies.sh emulator/
-          mv build-citron.sh emulator/
-          mv package-citron.sh emulator/
-
       - name: Add Git Safe Directory
-        working-directory: ./emulator
+        working-directory: ./citron
         run: git config --global --add safe.directory "$PWD"
 
       - name: Install dependencies
-        working-directory: ./emulator
+        working-directory: ./citron
         run: chmod +x ./get-dependencies.sh && ./get-dependencies.sh
 
       - name: Build Citron from source
-        working-directory: ./emulator
+        working-directory: ./citron
         run: |
           NPROC_VAL=$(nproc --all)
           JOBS_VAL=$((NPROC_VAL > 4 ? 4 : NPROC_VAL))
@@ -422,7 +419,7 @@ jobs:
           JOBS=${JOBS_VAL} DEVEL=false BUILD_TYPE=Nightly ./build-citron.sh ${{ matrix.build_arg }}
 
       - name: Package AppImage with Correct Name
-        working-directory: ./emulator
+        working-directory: ./citron
         run: |
           GIT_SHA=$(git rev-parse --short HEAD)
           export APP_VERSION="${GIT_SHA}"
@@ -436,7 +433,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Artifacts${{ matrix.artifact_suffix }}
-          path: emulator/dist/
+          path: citron/dist/
+
 
   # ===========================================================================
   # macOS
@@ -714,8 +712,14 @@ jobs:
           VERSION=$(git rev-parse --short HEAD)
           echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
 
+      - name: Map Build Directory (MSVC)
+        shell: cmd
+        run: |
+          subst Z: "%GITHUB_WORKSPACE%\citron"
+          echo "Mapped Z: to %GITHUB_WORKSPACE%\citron"
+
       - name: Configure CMake (MSVC)
-        working-directory: ./citron
+        working-directory: Z:\
         shell: cmd
         run: |
           cmake -B build -S . -G "Visual Studio 17 2022" -A x64 ^
@@ -732,7 +736,7 @@ jobs:
             -DCITRON_ENABLE_LIBARCHIVE=ON
 
       - name: Build Citron (MSVC)
-        working-directory: ./citron
+        working-directory: Z:\
         shell: cmd
         run: cmake --build build --config Release --parallel
 
@@ -741,14 +745,15 @@ jobs:
         run: |
           mkdir dist
           mkdir temp_package
-          Get-ChildItem ".\citron\build\bin\Release\" -Recurse | Where-Object { $_.Extension -ne ".pdb" } | ForEach-Object {
-            $relativePath = $_.FullName.Replace((Resolve-Path ".\citron\build\bin\Release\").Path, "").TrimStart('\')
+          Get-ChildItem "Z:\build\bin\Release\" -Recurse | Where-Object { $_.Extension -ne ".pdb" } | ForEach-Object {
+            $relativePath = $_.FullName.Replace((Resolve-Path "Z:\build\bin\Release\").Path, "").TrimStart('\')
             $destPath = Join-Path ".\temp_package" $relativePath
             $destDir = Split-Path $destPath -Parent
             if (!(Test-Path $destDir)) { New-Item -ItemType Directory -Path $destDir -Force | Out-Null }
             Copy-Item $_.FullName $destPath -Force
           }
           Compress-Archive -Path ".\temp_package\*" -DestinationPath ".\dist\Citron-windows-nightly-${{ steps.version.outputs.VERSION }}-x64-msvc.zip"
+          subst Z: /D
           Remove-Item ".\temp_package" -Recurse -Force
 
       - name: Upload Windows Build (MSVC)
